@@ -5,84 +5,131 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Validador QR — Dia da Mulher</title>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:18px}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:18px;max-width:720px}
     .card{border:1px solid #ddd;border-radius:14px;padding:14px;margin:12px 0}
-    button{padding:10px 14px;border:0;border-radius:10px;background:#111;color:#fff}
-    input{padding:10px 12px;border:1px solid #ccc;border-radius:10px;width:100%}
-    video{width:100%;max-width:420px;border-radius:14px;background:#000}
-    .ok{color:#0a7a2f;font-weight:700}
-    .bad{color:#b00020;font-weight:700}
+    button{padding:10px 12px;border:0;border-radius:10px;cursor:pointer;background:#111;color:#fff}
+    input{padding:10px 12px;border:1px solid #ccc;border-radius:10px;width:100%;max-width:420px}
+    .ok{color:#0a7a2f;font-weight:800}
+    .bad{color:#b00020;font-weight:800}
+    .muted{color:#666}
+    code{background:#f4f4f4;padding:2px 6px;border-radius:8px}
+    #reader{width:100%;max-width:520px}
   </style>
 </head>
 <body>
+  <h1>Validação de Convidados</h1>
+  <p class="muted">O QR deve conter apenas o <b>código</b> (ex.: <code>ALICIA01</code>).</p>
 
-<h2>Validação de Convidados</h2>
+  <div class="card">
+    <button id="startBtn">Ler QR Code</button>
+    <p id="msg" class="muted"></p>
+    <div id="reader" style="display:none;"></div>
+  </div>
 
-<div class="card">
-  <button onclick="start()">Ler QR Code</button>
-  <video id="video" playsinline></video>
-</div>
+  <div class="card">
+    <h3>Resultado</h3>
+    <div id="result" class="muted">Aguardando leitura…</div>
+  </div>
 
-<div class="card" id="resultado">Aguardando leitura…</div>
+  <div class="card">
+    <h3>Plano B (manual)</h3>
+    <input id="manual" placeholder="Código manual (ex: ALICIA01)" />
+    <button id="manualBtn" style="margin-top:10px">Validar manualmente</button>
+  </div>
 
-<div class="card">
-  <input id="manual" placeholder="Código manual (ex: ALICIA01)">
-  <button onclick="verificar(document.getElementById('manual').value)" style="margin-top:10px">
-    Validar manualmente
-  </button>
-</div>
+  <!-- Biblioteca que funciona no iPhone -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
 
-<script>
-  // LISTA DE CONVIDADOS (TESTE)
-  const convidados = {
-    "ALICIA01": "Alicia Reis",
-    "ARIANA01": "Ariana Silva"
-  };
+  <script>
+    // LISTA DE CONVIDADOS (TESTE)
+    const convidados = {
+      "ALICIA01": "Alicia Reis",
+      "ARIANA01": "Ariana Silva"
+    };
 
-  const resultado = document.getElementById('resultado');
-  const video = document.getElementById('video');
-  let stream, detector;
+    const els = {
+      startBtn: document.getElementById('startBtn'),
+      msg: document.getElementById('msg'),
+      reader: document.getElementById('reader'),
+      result: document.getElementById('result'),
+      manual: document.getElementById('manual'),
+      manualBtn: document.getElementById('manualBtn'),
+    };
 
-  function verificar(codigo){
-    codigo = codigo.trim();
-    if(convidados[codigo]){
-      resultado.innerHTML = `
-        <div class="ok">ESTÁ NA LISTA ✅</div>
-        <div><b>${convidados[codigo]}</b></div>
-        <div>Código: ${codigo}</div>
-      `;
-    } else {
-      resultado.innerHTML = `
-        <div class="bad">NÃO ESTÁ NA LISTA ❌</div>
-        <div>Código: ${codigo}</div>
-      `;
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, m => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[m]));
     }
-  }
 
-  async function start(){
-    if(!('BarcodeDetector' in window)){
-      resultado.innerHTML = "Este browser não suporta leitura automática. Usa o campo manual.";
-      return;
-    }
-    detector = new BarcodeDetector({formats:['qr_code']});
-    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
-    video.srcObject = stream;
-    video.play();
-    scan();
-  }
+    function mostrarResultado(codigo){
+      const code = String(codigo || '').trim();
+      if(!code) return;
 
-  async function scan(){
-    try{
-      const codes = await detector.detect(video);
-      if(codes.length){
-        verificar(codes[0].rawValue);
-        stream.getTracks().forEach(t=>t.stop());
-        return;
+      const nome = convidados[code];
+      if (nome) {
+        els.result.innerHTML = `
+          <div class="ok">ESTÁ NA LISTA ✅</div>
+          <div>Nome: <b>${escapeHtml(nome)}</b></div>
+          <div class="muted">Código: <code>${escapeHtml(code)}</code></div>
+        `;
+      } else {
+        els.result.innerHTML = `
+          <div class="bad">NÃO ESTÁ NA LISTA ❌</div>
+          <div class="muted">Código: <code>${escapeHtml(code)}</code></div>
+        `;
       }
-    }catch(e){}
-    requestAnimationFrame(scan);
-  }
-</script>
+    }
 
+    let qr = null;
+    let running = false;
+
+    async function startScan(){
+      if (running) return;
+
+      els.msg.textContent = "A pedir acesso à câmara…";
+      els.reader.style.display = "block";
+
+      if (!qr) qr = new Html5Qrcode("reader");
+
+      try {
+        running = true;
+
+        // iPhone: é melhor pedir a câmara traseira
+        const config = { fps: 10, qrbox: { width: 260, height: 260 } };
+
+        await qr.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            mostrarResultado(decodedText);
+
+            // Para após 1 leitura (mais simples na porta)
+            stopScan();
+          },
+          () => {}
+        );
+
+        els.msg.textContent = "A ler… aponta para o QR.";
+      } catch (e) {
+        running = false;
+        els.msg.textContent = "Não consegui iniciar a câmara. Abre no Safari/Chrome e permite a câmara nas permissões.";
+      }
+    }
+
+    async function stopScan(){
+      if (!qr || !running) return;
+      try { await qr.stop(); } catch(e) {}
+      running = false;
+      els.msg.textContent = "Leitura concluída.";
+    }
+
+    els.startBtn.addEventListener('click', startScan);
+
+    els.manualBtn.addEventListener('click', () => mostrarResultado(els.manual.value));
+    els.manual.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') mostrarResultado(els.manual.value);
+    });
+  </script>
 </body>
 </html>
