@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Validador QR — Dia da Mulher</title>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:18px;max-width:720px}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:18px;max-width:760px}
     .card{border:1px solid #ddd;border-radius:14px;padding:14px;margin:12px 0}
-    button{padding:10px 12px;border:0;border-radius:10px;cursor:pointer;background:#111;color:#fff}
-    input{padding:10px 12px;border:1px solid #ccc;border-radius:10px;width:100%;max-width:420px}
     .ok{color:#0a7a2f;font-weight:800}
     .bad{color:#b00020;font-weight:800}
     .muted{color:#666}
+    button{padding:10px 12px;border:0;border-radius:10px;cursor:pointer;background:#111;color:#fff}
+    input{padding:10px 12px;border:1px solid #ccc;border-radius:10px;width:100%;max-width:420px}
     code{background:#f4f4f4;padding:2px 6px;border-radius:8px}
     #reader{width:100%;max-width:520px}
   </style>
@@ -21,7 +21,7 @@
   <p class="muted">O QR deve conter apenas o <b>código</b> (ex.: <code>ALICIA01</code>).</p>
 
   <div class="card">
-    <button id="startBtn">Ler QR Code</button>
+    <button id="startBtn">Ler QR Code (abrir câmara)</button>
     <p id="msg" class="muted"></p>
     <div id="reader" style="display:none;"></div>
   </div>
@@ -37,24 +37,17 @@
     <button id="manualBtn" style="margin-top:10px">Validar manualmente</button>
   </div>
 
-  <!-- Biblioteca que funciona no iPhone -->
   <script src="https://unpkg.com/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
-
   <script>
-    // LISTA DE CONVIDADOS (TESTE)
     const convidados = {
       "ALICIA01": "Alicia Reis",
       "ARIANA01": "Ariana Silva"
     };
 
-    const els = {
-      startBtn: document.getElementById('startBtn'),
-      msg: document.getElementById('msg'),
-      reader: document.getElementById('reader'),
-      result: document.getElementById('result'),
-      manual: document.getElementById('manual'),
-      manualBtn: document.getElementById('manualBtn'),
-    };
+    const msg = document.getElementById("msg");
+    const result = document.getElementById("result");
+    const reader = document.getElementById("reader");
+    const startBtn = document.getElementById("startBtn");
 
     function escapeHtml(s){
       return String(s).replace(/[&<>"']/g, m => ({
@@ -62,73 +55,55 @@
       }[m]));
     }
 
-    function mostrarResultado(codigo){
-      const code = String(codigo || '').trim();
-      if(!code) return;
-
+    function mostrarResultado(raw){
+      const code = String(raw || "").trim();
       const nome = convidados[code];
-      if (nome) {
-        els.result.innerHTML = `
-          <div class="ok">ESTÁ NA LISTA ✅</div>
-          <div>Nome: <b>${escapeHtml(nome)}</b></div>
-          <div class="muted">Código: <code>${escapeHtml(code)}</code></div>
-        `;
+      if (nome){
+        result.innerHTML = `<div class="ok">ESTÁ NA LISTA ✅</div><div><b>${escapeHtml(nome)}</b></div><div class="muted">Código: <code>${escapeHtml(code)}</code></div>`;
       } else {
-        els.result.innerHTML = `
-          <div class="bad">NÃO ESTÁ NA LISTA ❌</div>
-          <div class="muted">Código: <code>${escapeHtml(code)}</code></div>
-        `;
+        result.innerHTML = `<div class="bad">NÃO ESTÁ NA LISTA ❌</div><div class="muted">Lido: <code>${escapeHtml(code)}</code></div>`;
       }
     }
 
-    let qr = null;
+    let html5Qr = null;
     let running = false;
 
-    async function startScan(){
+    async function start() {
       if (running) return;
+      msg.textContent = "A pedir acesso à câmara…";
+      reader.style.display = "block";
+      if (!html5Qr) html5Qr = new Html5Qrcode("reader");
 
-      els.msg.textContent = "A pedir acesso à câmara…";
-      els.reader.style.display = "block";
+      const config = { fps: 10, qrbox: { width: 280, height: 280 } };
 
-      if (!qr) qr = new Html5Qrcode("reader");
-
+      // 1) Tenta a câmara traseira explicitamente (iPhone)
       try {
         running = true;
+        await html5Qr.start({ facingMode: { exact: "environment" } }, config, (txt) => {
+          mostrarResultado(txt);
+        });
+        msg.textContent = "Câmara ligada. Aponta para o QR.";
+        return;
+      } catch (e1) {
+        // 2) Fallback: pede environment sem exact
+      }
 
-        // iPhone: é melhor pedir a câmara traseira
-        const config = { fps: 10, qrbox: { width: 260, height: 260 } };
-
-        await qr.start(
-          { facingMode: "environment" },
-          config,
-          (decodedText) => {
-            mostrarResultado(decodedText);
-
-            // Para após 1 leitura (mais simples na porta)
-            stopScan();
-          },
-          () => {}
-        );
-
-        els.msg.textContent = "A ler… aponta para o QR.";
-      } catch (e) {
+      try {
+        await html5Qr.start({ facingMode: "environment" }, config, (txt) => {
+          mostrarResultado(txt);
+        });
+        msg.textContent = "Câmara ligada. Aponta para o QR.";
+        running = true;
+      } catch (e2) {
         running = false;
-        els.msg.textContent = "Não consegui iniciar a câmara. Abre no Safari/Chrome e permite a câmara nas permissões.";
+        msg.textContent = "Bloqueado no iPhone. Fecha o Safari, abre de novo e confirma permissões (Definições → Safari → Câmara).";
       }
     }
 
-    async function stopScan(){
-      if (!qr || !running) return;
-      try { await qr.stop(); } catch(e) {}
-      running = false;
-      els.msg.textContent = "Leitura concluída.";
-    }
+    startBtn.addEventListener("click", start);
 
-    els.startBtn.addEventListener('click', startScan);
-
-    els.manualBtn.addEventListener('click', () => mostrarResultado(els.manual.value));
-    els.manual.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') mostrarResultado(els.manual.value);
+    document.getElementById("manualBtn").addEventListener("click", () => {
+      mostrarResultado(document.getElementById("manual").value);
     });
   </script>
 </body>
